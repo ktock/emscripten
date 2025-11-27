@@ -607,41 +607,19 @@ var SyscallsLibrary = {
     FS.chdir(stream.path);
     return 0;
   },
-  __syscall__newselect__deps: ['$newselectInner','malloc','free'],
-  __syscall__newselect__proxy: 'none',
-  __syscall__newselect: (nfds, readfds, writefds, exceptfds, timeout) => {
-#if PROXY_TO_PTHREAD
-    var waitPtr = _malloc(8);
-    var result = newselectInner(nfds, readfds, writefds, exceptfds, timeout, waitPtr);
-    if ((result != 0) || ((timeout) && (SYSCALLS.getTimeoutInMillis(timeout) == 0))) {
-      _free(waitPtr);
-      return result;
-    }
-    var fdRegion = {{{ makeGetValue('waitPtr', 0, '*') }}};
-    Atomics.wait(HEAP32 , fdRegion >> 2, -1);
-    var fd = Atomics.load(HEAP32 , fdRegion >> 2);
-    var flags = Atomics.load(HEAP32 , fdRegion >> 2 + 1);
-    _free(waitPtr);
-    if (fd < 0) return 0;
-    var fdSet = SYSCALLS.parseSelectFDSet(readfds, writefds, exceptfds);
-    fdSet.setFlags(fd, flags);
-    fdSet.commit();
-    return fdSet.getTotal();
+#if ASYNCIFY
+  __syscall__newselect__deps: ['$Asyncify'],
+  __syscall__newselect__async: true,
+  __syscall__newselect: (nfds, readfds, writefds, exceptfds, timeout) => { return Asyncify.handleAsync(() => (new Promise((resolve) => {
 #else
-    return newselectInner(nfds, readfds, writefds, exceptfds, timeout, -1);
+  __syscall__newselect: (nfds, readfds, writefds, exceptfds, timeout) => {
 #endif
-  },
-#if PROXY_TO_PTHREAD
-  $newselectInner__deps: ['$PThread', '$deactivateSelectCallbacks', '$getActiveSelectCallbacks', '$activateSelectCallback', '$isActiveSelectCallback'],
-#endif
-  $newselectInner__proxy: 'sync',
-  $newselectInner: (nfds, readfds, writefds, exceptfds, timeout, waitPtr) => {
     // readfds are supported,
     // writefds checks socket open status
     // exceptfds are supported, although on web, such exceptional conditions never arise in web sockets
     //                          and so the exceptfds list will always return empty.
     // timeout is supported, although on SOCKFS these are ignored and always treated as 0 - fully async
-    // and PIPEFS supports timeout only when PROXY_TO_PTHREAD is enabled.
+    // and PIPEFS supports timeout only when ASYNCIFY is enabled.
 #if ASSERTIONS
     assert(nfds <= 64, 'nfds must be less than or equal to 64');  // fd sets have 64 bits // TODO: this could be 1024 based on current musl headers
 #endif
@@ -662,35 +640,29 @@ var SyscallsLibrary = {
       timeoutInMillis = SYSCALLS.getTimeoutInMillis(timeout);
     }
 
-#if PROXY_TO_PTHREAD
-    const pthread_ptr = PThread.currentProxiedOperationCallerThread;
-    deactivateSelectCallbacks(pthread_ptr); // deactivate all old callbacks
+#if ASYNCIFY
     var makeNotifyCallback = (fd) => null;
     var cleanupFuncs = [];
     if (timeoutInMillis != 0) {
-      var info = getActiveSelectCallbacks(pthread_ptr);
-      {{{ makeSetValue('waitPtr', 0, 'info.buf', '*') }}};
-      Atomics.store(HEAP32, info.buf >> 2, -1); // Initialize the shared region
+      var done = false;
       makeNotifyCallback = (fd) => {
         var cb = (flags) => {
-          if (!isActiveSelectCallback(pthread_ptr, cb)) {
-            return; // This callback is no longer active.
-          }
-          deactivateSelectCallbacks(pthread_ptr); // Only the first event is notified.
+          if (done) return;
+          done = true;
           cleanupFuncs.forEach(cb => cb());
-          Atomics.store(HEAP32, info.buf >> 2 + 1, flags);
-          Atomics.store(HEAP32, info.buf >> 2, fd);
-          Atomics.notify(HEAP32, info.buf >> 2);
+          if (fd >= 0) {
+            fdSet.setFlags(fd, flags);
+          }
+          fdSet.commit();
+          resolve(fdSet.getTotal());
         }
         cb.registerCleanupFunc = (f) => {
           if (f != null) cleanupFuncs.push(f);
         }
-        activateSelectCallback(pthread_ptr, cb);
         return cb;
       }
       if (timeoutInMillis > 0) {
-        var cb = makeNotifyCallback(-2);
-        setTimeout(() => cb(0), timeoutInMillis);
+        setTimeout(() => makeNotifyCallback(-1)(0), timeoutInMillis);
       }
     }
 #endif
@@ -706,7 +678,7 @@ var SyscallsLibrary = {
       var flags = SYSCALLS.DEFAULT_POLLMASK;
 
       if (stream.stream_ops.poll) {
-#if PROXY_TO_PTHREAD
+#if ASYNCIFY
         flags = stream.stream_ops.poll(stream, timeoutInMillis, makeNotifyCallback(fd));
 #else
         flags = stream.stream_ops.poll(stream, ((timeoutInMillis < 0) || readfds) ? timeoutInMillis : 0);
@@ -716,20 +688,18 @@ var SyscallsLibrary = {
       fdSet.setFlags(fd, flags);
     }
 
-
-#if PROXY_TO_PTHREAD
+#if ASYNCIFY
     if ((fdSet.getTotal() > 0) || (timeoutInMillis == 0) ) {
-      fdSet.commit(fd, flags);
       // No wait will happen in the caller. Deactivate all callbacks.
-      deactivateSelectCallbacks(pthread_ptr);
       cleanupFuncs.forEach(f => f());
+      fdSet.commit();
+      resolve(fdSet.getTotal());
     }
+  })));},
 #else
-    fdSet.commit(fd, flags);
-#endif
-
     return fdSet.getTotal();
   },
+#endif
   _msync_js__i53abi: true,
   _msync_js: (addr, len, prot, flags, fd, offset) => {
     if (isNaN(offset)) return -{{{ cDefs.EOVERFLOW }}};

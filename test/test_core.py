@@ -9723,7 +9723,10 @@ NODEFS is no longer included by default; build with -lnodefs.js
     self.do_core_test('test_syscall_intercept.c')
 
   def test_pthread_select_timeout(self):
-    self.do_runf('core/test_pthread_select_timeout.c', cflags=['-pthread', '-sPROXY_TO_PTHREAD=1', '-sEXIT_RUNTIME=1', '-Wno-pthreads-mem-growth'])
+    self.do_runf('core/test_pthread_select_timeout.c', cflags=['-pthread', '-sPROXY_TO_PTHREAD=1', '-sEXIT_RUNTIME=1', '-Wno-pthreads-mem-growth', '-sASYNCIFY'])
+
+  def test_select_timeout(self):
+    self.do_runf('core/test_select_timeout.c', cflags=['-sASYNCIFY'])
 
   def test_select(self):
     self.do_runf('core/test_select.c')
