@@ -643,12 +643,15 @@ var SyscallsLibrary = {
 #if ASYNCIFY
     var makeNotifyCallback = (fd) => null;
     var cleanupFuncs = [];
+    var notifyDone = false;
     if (timeoutInMillis != 0) {
-      var done = false;
       makeNotifyCallback = (fd) => {
         var cb = (flags) => {
-          if (done) return;
-          done = true;
+          if (notifyDone) {
+            return;
+          } else {
+              notifyDone = true;
+          }
           cleanupFuncs.forEach(cb => cb());
           if (fd >= 0) {
             fdSet.setFlags(fd, flags);
@@ -691,9 +694,12 @@ var SyscallsLibrary = {
 #if ASYNCIFY
     if ((fdSet.getTotal() > 0) || (timeoutInMillis == 0) ) {
       // No wait will happen in the caller. Deactivate all callbacks.
-      cleanupFuncs.forEach(f => f());
-      fdSet.commit();
-      setTimeout(() => wakeUp(fdSet.getTotal()));
+      if (!notifyDone) {
+          notifyDone = true;
+          cleanupFuncs.forEach(f => f());
+          fdSet.commit();
+          setTimeout(() => wakeUp(fdSet.getTotal()));
+      }
     }
   });},
 #else
