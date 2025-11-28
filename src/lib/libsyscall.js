@@ -610,7 +610,8 @@ var SyscallsLibrary = {
 #if ASYNCIFY
   __syscall__newselect__deps: ['$Asyncify'],
   __syscall__newselect__async: true,
-  __syscall__newselect: (nfds, readfds, writefds, exceptfds, timeout) => { return Asyncify.handleAsync(() => (new Promise((resolve) => {
+  // __syscall__newselect: (nfds, readfds, writefds, exceptfds, timeout) => { return Asyncify.handleAsync(() => (new Promise((resolve) => {
+  __syscall__newselect: (nfds, readfds, writefds, exceptfds, timeout) => { return Asyncify.handleSleep((wakeUp) => {
 #else
   __syscall__newselect: (nfds, readfds, writefds, exceptfds, timeout) => {
 #endif
@@ -654,7 +655,7 @@ var SyscallsLibrary = {
             fdSet.setFlags(fd, flags);
           }
           fdSet.commit();
-          resolve(fdSet.getTotal());
+          setTimeout(() => wakeUp(fdSet.getTotal()));
         }
         cb.registerCleanupFunc = (f) => {
           if (f != null) cleanupFuncs.push(f);
@@ -693,9 +694,9 @@ var SyscallsLibrary = {
       // No wait will happen in the caller. Deactivate all callbacks.
       cleanupFuncs.forEach(f => f());
       fdSet.commit();
-      resolve(fdSet.getTotal());
+      setTimeout(() => wakeUp(fdSet.getTotal()));
     }
-  })));},
+  });},
 #else
     return fdSet.getTotal();
   },
