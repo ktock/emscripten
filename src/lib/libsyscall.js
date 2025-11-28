@@ -608,7 +608,6 @@ var SyscallsLibrary = {
     return 0;
   },
 #if ASYNCIFY
-  __syscall__newselect__deps: ['$Asyncify'],
   __syscall__newselect__async: true,
   // __syscall__newselect: (nfds, readfds, writefds, exceptfds, timeout) => { return Asyncify.handleAsync(() => (new Promise((resolve) => {
   __syscall__newselect: (nfds, readfds, writefds, exceptfds, timeout) => { return Asyncify.handleSleep((wakeUp) => {
